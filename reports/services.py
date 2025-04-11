@@ -1,10 +1,29 @@
 from django.db import connection, models
 
-from .models import Order
+from .models import Order, OrderStatus
 
 
 def get_orders_by_priority():
-    return Order.objects.all()
+    return Order.objects.annotate(
+        priority= models.Case(
+            models.When(
+                status=OrderStatus.IN_PROGRESS,
+                then=0
+            ),
+            models.When(
+                status=OrderStatus.PAID,
+                then=1
+            ),
+            models.When(
+                status=OrderStatus.SHIPPED,
+                then=2
+            ),
+            models.When(
+                status=OrderStatus.DELIVERED,
+                then=3
+            ),
+        )
+    ).order_by("priority")
 
 
 def get_order_leaderboard():
@@ -14,7 +33,10 @@ def get_order_leaderboard():
 
     totals = OrderTotals.objects.raw(
         """\
-        select 'Total' as category, 0 as total
+            select Coalesce(product, 'Total') as category, count(*) as total from reports_order
+            group by Rollup(product)
+            order by total desc
+            limit 6;
         """
     )
 
@@ -28,7 +50,17 @@ def get_order_leaderboard_with_other():
 
     totals = OrderTotals.objects.raw(
         """\
-        select 'Total' as category, 0 as total
+            with (select Coalesce(product, 'Total') as category, count(*) as total from reports_order
+            group by Rollup(product)
+            order by total desc
+            ) as a
+            Union
+            (
+            select Coalesce(product, 'Total') as category, count(*) as total from reports_order
+            group by Rollup(product)
+            order by total asc
+            limit 6
+            )
         """
     )
 
@@ -56,15 +88,15 @@ def get_set_from_db(query):
 
 
 def series_1_to_10():
-    return get_set_from_db("select 1")
+    return get_set_from_db("select generate_series(1,10)")
 
 
 def series_even_numbers_to_20():
-    return get_set_from_db("select 2")
+    return get_set_from_db("select generate_series(2,20, 2)")
 
 
 def series_date_range_jan_2025():
-    return get_set_from_db("select '2025-01-01'::timestamptz")
+    return get_set_from_db("select generate_series('2025-01-01'::timestamptz, '2025-01-31'::timestamptz, '1 day'::interval)")
 
 
 def sales_report():
